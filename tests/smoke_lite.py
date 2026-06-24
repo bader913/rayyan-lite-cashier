@@ -10,6 +10,7 @@ from app.db.database import Database
 from app.services.backup_service import BackupService
 from app.services.product_excel_service import PRODUCT_EXCEL_HEADERS, ProductExcelService
 from app.services.products_service import ProductsService
+from app.services.purchases_service import PurchasesService
 from app.services.sales_service import SalesService
 from app.services.settings_service import SettingsService
 
@@ -21,6 +22,7 @@ def main() -> None:
         db.initialize()
         products = ProductsService(db)
         sales = SalesService(db)
+        purchases = PurchasesService(db)
         settings = SettingsService(db)
         settings.ensure_defaults()
         product_id = products.create_product(
@@ -37,14 +39,25 @@ def main() -> None:
                 "min_stock_level": "1",
             }
         )
+        purchase_result = purchases.create_purchase(
+            [{"product_id": product_id, "quantity": "3", "unit_price": "12"}],
+            supplier_name="مورد تجربة",
+            update_product_cost=True,
+        )
+        assert purchase_result["invoice_number"] == "PUR-000001"
+        product = products.get_product(product_id)
+        assert product is not None
+        assert product["stock_quantity"] == "8.0000"
+        assert product["purchase_price"] == "12.0000"
+        assert product["category"] == "تجارب"
+
         result = sales.create_sale([{"product_id": product_id, "quantity": "2", "unit_price": "15", "discount": "0"}])
         product = products.get_product(product_id)
         assert product is not None
-        assert product["stock_quantity"] == "3.0000"
-        assert product["category"] == "تجارب"
+        assert product["stock_quantity"] == "6.0000"
         assert result["total_amount"] == "30.0000"
         details = sales.get_sale_details(int(result["sale_id"]))
-        assert str(details["sale"].get("gross_profit")) in {"10", "10.0", "10.0000"}
+        assert str(details["sale"].get("gross_profit")) in {"6", "6.0", "6.0000"}
 
         excel = ProductExcelService(db)
         import_file = temp / "products_import.xlsx"

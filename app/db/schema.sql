@@ -115,6 +115,11 @@ CREATE TABLE IF NOT EXISTS purchase_items (
   total_price TEXT NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_purchases_created_at ON purchases(created_at);
+CREATE INDEX IF NOT EXISTS idx_purchases_invoice_number ON purchases(invoice_number);
+CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase_id ON purchase_items(purchase_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_items_product_id ON purchase_items(product_id);
+
 CREATE TABLE IF NOT EXISTS stock_movements (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   product_id INTEGER NOT NULL REFERENCES products(id),

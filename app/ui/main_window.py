@@ -8,6 +8,7 @@ from app.services.settings_service import SettingsService
 from app.ui.pages.dashboard_page import DashboardPage
 from app.ui.pages.products_page import ProductsPage
 from app.ui.pages.pos_page import PosPage
+from app.ui.pages.purchases_page import PurchasesPage
 from app.ui.pages.reports_page import ReportsPage
 from app.ui.pages.settings_page import SettingsPage
 from app.ui.theme import build_app_stylesheet
@@ -33,6 +34,7 @@ class MainWindow(QMainWindow):
         self.sidebar.setObjectName("sidebar")
         self.sidebar.addItem(QListWidgetItem("لوحة اليوم"))
         self.sidebar.addItem(QListWidgetItem("بيع سريع"))
+        self.sidebar.addItem(QListWidgetItem("المشتريات"))
         self.sidebar.addItem(QListWidgetItem("المنتجات"))
         self.sidebar.addItem(QListWidgetItem("التقارير"))
         self.sidebar.addItem(QListWidgetItem("الإعدادات والنسخ"))
@@ -54,11 +56,12 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.dashboard_page = DashboardPage(db)
         self.pos_page = PosPage(db, on_sale_saved=self.refresh_all)
+        self.purchases_page = PurchasesPage(db, on_purchase_saved=self.refresh_all)
         self.products_page = ProductsPage(db, on_products_changed=self.refresh_all)
         self.reports_page = ReportsPage(db)
         self.settings_page = SettingsPage(db, on_settings_changed=self.refresh_all)
 
-        for page in [self.dashboard_page, self.pos_page, self.products_page, self.reports_page, self.settings_page]:
+        for page in [self.dashboard_page, self.pos_page, self.purchases_page, self.products_page, self.reports_page, self.settings_page]:
             self.stack.addWidget(page)
 
         main_layout.addWidget(side_frame)
@@ -77,7 +80,7 @@ class MainWindow(QMainWindow):
 
     def refresh_all(self) -> None:
         self.apply_style()
-        for page in [self.dashboard_page, self.products_page, self.pos_page, self.reports_page, self.settings_page]:
+        for page in [self.dashboard_page, self.products_page, self.pos_page, self.purchases_page, self.reports_page, self.settings_page]:
             if hasattr(page, "refresh"):
                 page.refresh()
 

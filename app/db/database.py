@@ -64,6 +64,11 @@ class Database:
         self._add_column_if_missing(conn, "sales", "edit_count", "edit_count INTEGER NOT NULL DEFAULT 0")
         self._add_column_if_missing(conn, "sales", "last_edit_reason", "last_edit_reason TEXT")
 
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_purchases_created_at ON purchases(created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_purchases_invoice_number ON purchases(invoice_number)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase_id ON purchase_items(purchase_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_purchase_items_product_id ON purchase_items(product_id)")
+
         # Backfill historical currency snapshot for old invoices from current settings.
         conn.execute(
             """
