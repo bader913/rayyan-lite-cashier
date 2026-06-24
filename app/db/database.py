@@ -43,6 +43,18 @@ class Database:
     def _apply_lightweight_migrations(self, conn: sqlite3.Connection) -> None:
         # SQLite CREATE TABLE IF NOT EXISTS will not add new columns to existing DBs.
         # Keep safe additive migrations here.
+        self._add_column_if_missing(conn, "products", "extra_scan_code", "extra_scan_code TEXT")
+        self._add_column_if_missing(conn, "products", "category", "category TEXT")
+        self._add_column_if_missing(conn, "products", "supplier", "supplier TEXT")
+        self._add_column_if_missing(conn, "products", "is_weighted", "is_weighted INTEGER NOT NULL DEFAULT 0")
+        self._add_column_if_missing(conn, "products", "has_parts", "has_parts INTEGER NOT NULL DEFAULT 0")
+        self._add_column_if_missing(conn, "products", "part_name", "part_name TEXT")
+        self._add_column_if_missing(conn, "products", "parts_per_unit", "parts_per_unit TEXT NOT NULL DEFAULT '1.0000'")
+        self._add_column_if_missing(conn, "products", "wholesale_price", "wholesale_price TEXT NOT NULL DEFAULT '0.0000'")
+        self._add_column_if_missing(conn, "products", "wholesale_min_qty", "wholesale_min_qty TEXT NOT NULL DEFAULT '1.0000'")
+        self._add_column_if_missing(conn, "products", "expiry_date", "expiry_date TEXT")
+        self._add_column_if_missing(conn, "products", "image_url", "image_url TEXT")
+
         self._add_column_if_missing(conn, "sales", "currency_name", "currency_name TEXT")
         self._add_column_if_missing(conn, "sales", "currency_symbol", "currency_symbol TEXT")
         self._add_column_if_missing(conn, "sales", "exchange_currency_name", "exchange_currency_name TEXT")

@@ -395,11 +395,14 @@ class SalesService:
             rows = conn.execute(
                 """
                 SELECT
-                  id, invoice_number, total_amount, paid_amount, payment_method, created_at,
-                  currency_name, currency_symbol, exchange_currency_name, exchange_currency_symbol, exchange_rate,
-                  edit_count, edited_at, last_edit_reason
-                FROM sales
-                ORDER BY id DESC
+                  s.id, s.invoice_number, s.total_amount, s.paid_amount, s.payment_method, s.created_at,
+                  s.currency_name, s.currency_symbol, s.exchange_currency_name, s.exchange_currency_symbol, s.exchange_rate,
+                  s.edit_count, s.edited_at, s.last_edit_reason,
+                  COALESCE(SUM(CAST(si.profit_amount AS REAL)), 0) AS gross_profit
+                FROM sales s
+                LEFT JOIN sale_items si ON si.sale_id = s.id
+                GROUP BY s.id
+                ORDER BY s.id DESC
                 LIMIT ?
                 """,
                 (limit,),
@@ -411,12 +414,13 @@ class SalesService:
             sale = conn.execute(
                 """
                 SELECT
-                  id, invoice_number, subtotal, discount, total_amount, paid_amount, payment_method,
-                  currency_name, currency_symbol, exchange_currency_name, exchange_currency_symbol, exchange_rate,
-                  edit_count, edited_at, last_edit_reason,
-                  notes, created_at
-                FROM sales
-                WHERE id = ?
+                  s.id, s.invoice_number, s.subtotal, s.discount, s.total_amount, s.paid_amount, s.payment_method,
+                  s.currency_name, s.currency_symbol, s.exchange_currency_name, s.exchange_currency_symbol, s.exchange_rate,
+                  s.edit_count, s.edited_at, s.last_edit_reason,
+                  s.notes, s.created_at,
+                  COALESCE((SELECT SUM(CAST(si.profit_amount AS REAL)) FROM sale_items si WHERE si.sale_id = s.id), 0) AS gross_profit
+                FROM sales s
+                WHERE s.id = ?
                 """,
                 (sale_id,),
             ).fetchone()

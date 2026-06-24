@@ -46,8 +46,8 @@ class DashboardPage(QWidget):
         layout.addWidget(refresh_btn)
 
         layout.addWidget(QLabel("آخر الفواتير - اضغط مرتين لفتح الفاتورة"))
-        self.sales_table = QTableWidget(0, 5)
-        self.sales_table.setHorizontalHeaderLabels(["#", "رقم الفاتورة", "الإجمالي", "الدفع", "التاريخ"])
+        self.sales_table = QTableWidget(0, 6)
+        self.sales_table.setHorizontalHeaderLabels(["#", "رقم الفاتورة", "الإجمالي", "الربح", "الدفع", "التاريخ"])
         self.sales_table.horizontalHeader().setStretchLastSection(True)
         self.sales_table.setAlternatingRowColors(True)
         self.sales_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -88,6 +88,7 @@ class DashboardPage(QWidget):
                 row["id"],
                 f"{row['invoice_number']}{edited_mark}",
                 money_label(row["total_amount"], row_settings),
+                money_label(row.get("gross_profit") or 0, row_settings),
                 "نقدي" if row["payment_method"] == "cash" else "بطاقة",
                 row["created_at"],
             ]
@@ -95,7 +96,7 @@ class DashboardPage(QWidget):
                 item = QTableWidgetItem(str(value))
                 if c == 0:
                     item.setData(Qt.UserRole, int(row["id"]))
-                if c in {0, 2, 3}:
+                if c in {0, 2, 3, 4}:
                     item.setTextAlignment(Qt.AlignCenter)
                 self.sales_table.setItem(i, c, item)
 

@@ -199,8 +199,8 @@ class InvoiceDialog(QDialog):
         header_layout.addWidget(self.edit_label, 2, 0, 1, 2)
         root.addWidget(self.header)
 
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["المنتج", "الكمية", "السعر", "الخصم", "الإجمالي"])
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(["المنتج", "الكمية", "السعر", "الخصم", "الإجمالي", "الربح"])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -220,10 +220,14 @@ class InvoiceDialog(QDialog):
         summary_layout.addWidget(QLabel("فرق/باقي"), 2, 0)
         self.change_label = QLabel("")
         summary_layout.addWidget(self.change_label, 2, 1)
-        summary_layout.addWidget(QLabel("سعر الصرف التاريخي"), 3, 0)
+        summary_layout.addWidget(QLabel("ربح الفاتورة"), 3, 0)
+        self.profit_label = QLabel("")
+        self.profit_label.setObjectName("totalStrong")
+        summary_layout.addWidget(self.profit_label, 3, 1)
+        summary_layout.addWidget(QLabel("سعر الصرف التاريخي"), 4, 0)
         self.exchange_label = QLabel("")
         self.exchange_label.setWordWrap(True)
-        summary_layout.addWidget(self.exchange_label, 3, 1)
+        summary_layout.addWidget(self.exchange_label, 4, 1)
         root.addWidget(self.summary)
 
         actions = QHBoxLayout()
@@ -274,10 +278,11 @@ class InvoiceDialog(QDialog):
                 money_label(item["unit_price"], self.settings),
                 money_label(item["discount"], self.settings),
                 money_label(item["total_price"], self.settings),
+                money_label(item.get("profit_amount") or 0, self.settings),
             ]
             for c, value in enumerate(values):
                 table_item = QTableWidgetItem(str(value))
-                if c in {1, 2, 3, 4}:
+                if c in {1, 2, 3, 4, 5}:
                     table_item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(r, c, table_item)
 
@@ -292,6 +297,7 @@ class InvoiceDialog(QDialog):
             self.change_label.setText(f"باقي/مرتجع للزبون: {money_label(change, self.settings)}")
         else:
             self.change_label.setText(f"متبقي: {money_label(abs(change), self.settings)}")
+        self.profit_label.setText(money_label(sale.get("gross_profit") or 0, self.settings))
         hint = exchange_hint(total, self.settings)
         self.exchange_label.setText(hint or "لا يوجد سعر صرف تاريخي مختلف")
 

@@ -11,5 +11,9 @@ def show_info(parent: QWidget, title: str, message: str) -> None:
     QMessageBox.information(parent, title, message)
 
 
+def show_warning(parent: QWidget, title: str, message: str) -> None:
+    QMessageBox.warning(parent, title, message)
+
+
 def confirm(parent: QWidget, title: str, message: str) -> bool:
     return QMessageBox.question(parent, title, message, QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes

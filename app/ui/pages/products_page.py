@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -18,17 +20,19 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.currency import money_label
-from app.core.money import display, display_qty
+from app.core.money import display, display_qty, money
 from app.db.database import Database
+from app.services.product_excel_service import ProductExcelService
 from app.services.products_service import ProductsService
 from app.services.settings_service import SettingsService
-from app.ui.widgets import show_error, show_info
+from app.ui.widgets import show_error, show_info, show_warning
 
 
 class ProductsPage(QWidget):
     def __init__(self, db: Database, on_products_changed: Callable[[], None] | None = None):
         super().__init__()
         self.service = ProductsService(db)
+        self.excel = ProductExcelService(db)
         self.settings = SettingsService(db)
         self.current_settings = self.settings.get_all()
         self.on_products_changed = on_products_changed
@@ -42,9 +46,17 @@ class ProductsPage(QWidget):
 
         top = QHBoxLayout()
         self.search = QLineEdit()
-        self.search.setPlaceholderText("بحث بالاسم أو الباركود")
+        self.search.setPlaceholderText("بحث بالاسم أو الباركود أو الفئة")
         self.search.textChanged.connect(self.refresh)
         top.addWidget(self.search, 1)
+        import_btn = QPushButton("استيراد Excel")
+        import_btn.setObjectName("accent")
+        import_btn.clicked.connect(self.import_excel)
+        top.addWidget(import_btn)
+        export_btn = QPushButton("تصدير Excel")
+        export_btn.setObjectName("success")
+        export_btn.clicked.connect(self.export_excel)
+        top.addWidget(export_btn)
         refresh_btn = QPushButton("تحديث")
         refresh_btn.setObjectName("secondary")
         refresh_btn.clicked.connect(self.refresh)
@@ -52,8 +64,8 @@ class ProductsPage(QWidget):
         root.addLayout(top)
 
         body = QHBoxLayout()
-        self.table = QTableWidget(0, 8)
-        self.table.setHorizontalHeaderLabels(["ID", "الباركود", "الاسم", "الوحدة", "شراء", "بيع", "الكمية", "حد التنبيه"])
+        self.table = QTableWidget(0, 10)
+        self.table.setHorizontalHeaderLabels(["ID", "الباركود", "الاسم", "الفئة", "الوحدة", "شراء", "بيع", "ربح", "الكمية", "حد التنبيه"])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setAlternatingRowColors(True)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -65,18 +77,24 @@ class ProductsPage(QWidget):
         form = QFormLayout(form_wrap)
         self.name = QLineEdit()
         self.barcode = QLineEdit()
+        self.category = QLineEdit()
+        self.supplier = QLineEdit()
         self.unit = QLineEdit("قطعة")
         self.purchase_price = QLineEdit("0")
         self.retail_price = QLineEdit("0")
+        self.wholesale_price = QLineEdit("0")
         self.stock_quantity = QLineEdit("0")
         self.min_stock_level = QLineEdit("0")
         self.notes = QTextEdit()
         self.notes.setFixedHeight(70)
         form.addRow("اسم المنتج", self.name)
         form.addRow("باركود", self.barcode)
+        form.addRow("الفئة", self.category)
+        form.addRow("المورد", self.supplier)
         form.addRow("الوحدة", self.unit)
         form.addRow("سعر الشراء", self.purchase_price)
-        form.addRow("سعر البيع", self.retail_price)
+        form.addRow("سعر البيع مفرق", self.retail_price)
+        form.addRow("سعر البيع جملة", self.wholesale_price)
         form.addRow("الكمية", self.stock_quantity)
         form.addRow("حد التنبيه", self.min_stock_level)
         form.addRow("ملاحظات", self.notes)
@@ -102,9 +120,12 @@ class ProductsPage(QWidget):
         return {
             "name": self.name.text(),
             "barcode": self.barcode.text(),
+            "category": self.category.text(),
+            "supplier": self.supplier.text(),
             "unit": self.unit.text(),
             "purchase_price": self.purchase_price.text(),
             "retail_price": self.retail_price.text(),
+            "wholesale_price": self.wholesale_price.text(),
             "stock_quantity": self.stock_quantity.text(),
             "min_stock_level": self.min_stock_level.text(),
             "notes": self.notes.toPlainText(),
@@ -114,9 +135,12 @@ class ProductsPage(QWidget):
         self.selected_product_id = None
         self.name.clear()
         self.barcode.clear()
+        self.category.clear()
+        self.supplier.clear()
         self.unit.setText("قطعة")
         self.purchase_price.setText("0")
         self.retail_price.setText("0")
+        self.wholesale_price.setText("0")
         self.stock_quantity.setText("0")
         self.min_stock_level.setText("0")
         self.notes.clear()
@@ -127,13 +151,16 @@ class ProductsPage(QWidget):
         rows = self.service.list_products(self.search.text())
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
+            profit = money(row["retail_price"]) - money(row["purchase_price"])
             values = [
                 row["id"],
                 row.get("barcode") or "",
                 row["name"],
+                row.get("category") or "",
                 row["unit"],
                 money_label(row["purchase_price"], self.current_settings),
                 money_label(row["retail_price"], self.current_settings),
+                money_label(profit, self.current_settings),
                 display_qty(row["stock_quantity"]),
                 display_qty(row["min_stock_level"]),
             ]
@@ -141,6 +168,8 @@ class ProductsPage(QWidget):
                 item = QTableWidgetItem(str(value))
                 if c == 0:
                     item.setData(Qt.UserRole, int(row["id"]))
+                if c in {0, 5, 6, 7, 8, 9}:
+                    item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(r, c, item)
 
     def load_selected(self) -> None:
@@ -158,9 +187,12 @@ class ProductsPage(QWidget):
         self.selected_product_id = product_id
         self.name.setText(product["name"])
         self.barcode.setText(product.get("barcode") or "")
+        self.category.setText(product.get("category") or "")
+        self.supplier.setText(product.get("supplier") or "")
         self.unit.setText(product.get("unit") or "قطعة")
         self.purchase_price.setText(display(product["purchase_price"]))
         self.retail_price.setText(display(product["retail_price"]))
+        self.wholesale_price.setText(display(product.get("wholesale_price") or "0"))
         self.stock_quantity.setText(display_qty(product["stock_quantity"]))
         self.min_stock_level.setText(display_qty(product["min_stock_level"]))
         self.notes.setPlainText(product.get("notes") or "")
@@ -188,3 +220,47 @@ class ProductsPage(QWidget):
             show_info(self, "تم", "تم حفظ التعديل بنجاح")
         except Exception as exc:
             show_error(self, "خطأ", str(exc))
+
+    def import_excel(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "اختر ملف منتجات Excel",
+            str(Path.home() / "Downloads"),
+            "Excel Files (*.xlsx)",
+        )
+        if not path:
+            return
+        try:
+            result = self.excel.import_excel(path)
+            self.refresh()
+            if self.on_products_changed:
+                self.on_products_changed()
+            message = (
+                f"تم الاستيراد\n"
+                f"جديد: {result['created']}\n"
+                f"محدث: {result['updated']}\n"
+                f"متجاهل: {result['skipped']}"
+            )
+            if result["errors"]:
+                message += "\n\nأخطاء أولية:\n" + "\n".join(result["errors"][:8])
+                show_warning(self, "تم مع ملاحظات", message)
+            else:
+                show_info(self, "تم", message)
+        except Exception as exc:
+            show_error(self, "خطأ في استيراد المنتجات", str(exc))
+
+    def export_excel(self) -> None:
+        default = Path.home() / "Downloads" / "products_export_lite.xlsx"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "حفظ ملف المنتجات",
+            str(default),
+            "Excel Files (*.xlsx)",
+        )
+        if not path:
+            return
+        try:
+            out = self.excel.export_excel(path)
+            show_info(self, "تم", f"تم تصدير المنتجات هنا:\n{out}")
+        except Exception as exc:
+            show_error(self, "خطأ في تصدير المنتجات", str(exc))

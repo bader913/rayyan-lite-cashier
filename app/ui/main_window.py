@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
 
 from app.db.database import Database
+from app.services.settings_service import SettingsService
 from app.ui.pages.dashboard_page import DashboardPage
 from app.ui.pages.products_page import ProductsPage
 from app.ui.pages.pos_page import PosPage
@@ -16,9 +17,10 @@ class MainWindow(QMainWindow):
     def __init__(self, db: Database):
         super().__init__()
         self.db = db
+        self.settings = SettingsService(db)
         self.setWindowTitle("Rayyan Lite - كاشير خفيف")
-        self.resize(1240, 780)
-        self.setMinimumSize(1060, 680)
+        self.resize(1280, 790)
+        self.setMinimumSize(1080, 700)
         self.setLayoutDirection(Qt.RightToLeft)
 
         root = QWidget()
@@ -27,7 +29,7 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(0)
 
         self.sidebar = QListWidget()
-        self.sidebar.setFixedWidth(230)
+        self.sidebar.setFixedWidth(235)
         self.sidebar.setObjectName("sidebar")
         self.sidebar.addItem(QListWidgetItem("لوحة اليوم"))
         self.sidebar.addItem(QListWidgetItem("بيع سريع"))
@@ -38,8 +40,8 @@ class MainWindow(QMainWindow):
         side_frame = QFrame()
         side_frame.setObjectName("sideFrame")
         side_layout = QVBoxLayout(side_frame)
-        side_layout.setContentsMargins(14, 18, 14, 14)
-        side_layout.setSpacing(6)
+        side_layout.setContentsMargins(16, 20, 16, 16)
+        side_layout.setSpacing(8)
         title = QLabel("Rayyan Lite")
         title.setObjectName("appTitle")
         subtitle = QLabel("كاشير خفيف للمحلات الصغيرة")
@@ -74,9 +76,11 @@ class MainWindow(QMainWindow):
             page.refresh()
 
     def refresh_all(self) -> None:
-        for page in [self.dashboard_page, self.products_page, self.pos_page, self.reports_page]:
+        self.apply_style()
+        for page in [self.dashboard_page, self.products_page, self.pos_page, self.reports_page, self.settings_page]:
             if hasattr(page, "refresh"):
                 page.refresh()
 
     def apply_style(self) -> None:
-        self.setStyleSheet(build_app_stylesheet())
+        values = self.settings.get_all()
+        self.setStyleSheet(build_app_stylesheet(values.get('theme_mode', 'light')))

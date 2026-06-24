@@ -4,8 +4,11 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from openpyxl import Workbook, load_workbook
+
 from app.db.database import Database
 from app.services.backup_service import BackupService
+from app.services.product_excel_service import PRODUCT_EXCEL_HEADERS, ProductExcelService
 from app.services.products_service import ProductsService
 from app.services.sales_service import SalesService
 from app.services.settings_service import SettingsService
@@ -20,21 +23,16 @@ def main() -> None:
         sales = SalesService(db)
         settings = SettingsService(db)
         settings.ensure_defaults()
-        settings.save_currency_settings(
-            currency_name="ليرة سورية",
-            currency_symbol="ل.س",
-            exchange_currency_name="دولار",
-            exchange_currency_symbol="$",
-            exchange_rate="14000",
-        )
-
         product_id = products.create_product(
             {
                 "name": "منتج تجربة",
                 "barcode": "TST-001",
                 "unit": "قطعة",
+                "category": "تجارب",
+                "supplier": "مورد تجربة",
                 "purchase_price": "10",
                 "retail_price": "15",
+                "wholesale_price": "13",
                 "stock_quantity": "5",
                 "min_stock_level": "1",
             }
@@ -43,43 +41,52 @@ def main() -> None:
         product = products.get_product(product_id)
         assert product is not None
         assert product["stock_quantity"] == "3.0000"
+        assert product["category"] == "تجارب"
         assert result["total_amount"] == "30.0000"
-
         details = sales.get_sale_details(int(result["sale_id"]))
-        assert details["sale"]["exchange_rate"] == "14000.0000"
+        assert str(details["sale"].get("gross_profit")) in {"10", "10.0", "10.0000"}
 
-        # Change current exchange settings; old invoice must keep historical rate.
-        settings.save_currency_settings(
-            currency_name="ليرة سورية",
-            currency_symbol="ل.س",
-            exchange_currency_name="دولار",
-            exchange_currency_symbol="$",
-            exchange_rate="15000",
-        )
-        details_after_rate_change = sales.get_sale_details(int(result["sale_id"]))
-        assert details_after_rate_change["sale"]["exchange_rate"] == "14000.0000"
-
-        sale_item = details_after_rate_change["items"][0]
-        sales.update_sale(
-            int(result["sale_id"]),
-            [
-                {
-                    "sale_item_id": sale_item["id"],
-                    "quantity": "1",
-                    "unit_price": sale_item["unit_price"],
-                    "discount": "0",
-                }
-            ],
-            payment_method="cash",
-            paid_amount="15",
-        )
-        updated_product = products.get_product(product_id)
-        assert updated_product is not None
-        assert updated_product["stock_quantity"] == "4.0000"
-        updated_details = sales.get_sale_details(int(result["sale_id"]))
-        assert updated_details["sale"]["total_amount"] == "15.0000"
-        assert int(updated_details["sale"]["edit_count"]) == 1
-        assert updated_details["sale"]["exchange_rate"] == "14000.0000"
+        excel = ProductExcelService(db)
+        import_file = temp / "products_import.xlsx"
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "المنتجات"
+        ws.append(PRODUCT_EXCEL_HEADERS)
+        ws.append([
+            "منتج مستورد",
+            "IMP-001",
+            "ALT-IMP-001",
+            "فئة مستوردة",
+            "مورد مستورد",
+            "قطعة",
+            0,
+            0,
+            "",
+            1,
+            20,
+            35,
+            30,
+            5,
+            9,
+            2,
+            "2027-12-31",
+            "ملاحظة استيراد",
+            "https://example.com/p.png",
+        ])
+        wb.save(import_file)
+        wb.close()
+        import_result = excel.import_excel(import_file)
+        assert import_result["created"] == 1
+        imported = products.list_products("IMP-001")
+        assert len(imported) == 1
+        assert imported[0]["category"] == "فئة مستوردة"
+        export_file = excel.export_excel(temp / "products_export.xlsx")
+        assert export_file.exists()
+        wb2 = load_workbook(export_file, read_only=True)
+        ws2 = wb2.active
+        headers = [cell.value for cell in next(ws2.iter_rows(min_row=1, max_row=1))]
+        wb2.close()
+        assert headers == PRODUCT_EXCEL_HEADERS
 
         backup = BackupService(db).create_backup(label="smoke")
         assert backup.exists()

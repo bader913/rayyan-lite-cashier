@@ -12,6 +12,7 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "exchange_currency_name": "دولار",
     "exchange_currency_symbol": "$",
     "exchange_rate": "1.0000",
+    "theme_mode": "light",
 }
 
 
