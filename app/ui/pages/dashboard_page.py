@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QAbstractItemView, QFrame, QGridLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
-from app.core.currency import money_label
+from app.core.currency import money_label, settings_from_sale_snapshot
 from app.db.database import Database
 from app.services.products_service import ProductsService
 from app.services.sales_service import SalesService
@@ -82,10 +82,12 @@ class DashboardPage(QWidget):
         rows = self.sales.recent_sales(20)
         self.sales_table.setRowCount(len(rows))
         for i, row in enumerate(rows):
+            row_settings = settings_from_sale_snapshot(row, self.current_settings)
+            edited_mark = " ✎" if int(row.get("edit_count") or 0) else ""
             values = [
                 row["id"],
-                row["invoice_number"],
-                money_label(row["total_amount"], self.current_settings),
+                f"{row['invoice_number']}{edited_mark}",
+                money_label(row["total_amount"], row_settings),
                 "نقدي" if row["payment_method"] == "cash" else "بطاقة",
                 row["created_at"],
             ]

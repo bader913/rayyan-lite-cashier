@@ -55,6 +55,14 @@ CREATE TABLE IF NOT EXISTS sales (
   total_amount TEXT NOT NULL DEFAULT '0.0000',
   paid_amount TEXT NOT NULL DEFAULT '0.0000',
   payment_method TEXT NOT NULL DEFAULT 'cash' CHECK (payment_method IN ('cash','card')),
+  currency_name TEXT,
+  currency_symbol TEXT,
+  exchange_currency_name TEXT,
+  exchange_currency_symbol TEXT,
+  exchange_rate TEXT NOT NULL DEFAULT '1.0000',
+  edit_count INTEGER NOT NULL DEFAULT 0,
+  edited_at TEXT,
+  last_edit_reason TEXT,
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
@@ -133,3 +141,5 @@ INSERT OR IGNORE INTO settings(key, value) VALUES ('currency_symbol', 'ل.س');
 INSERT OR IGNORE INTO settings(key, value) VALUES ('exchange_currency_name', 'دولار');
 INSERT OR IGNORE INTO settings(key, value) VALUES ('exchange_currency_symbol', '$');
 INSERT OR IGNORE INTO settings(key, value) VALUES ('exchange_rate', '1.0000');
+
+INSERT OR IGNORE INTO settings(key, value) VALUES ('theme_mode', 'light');

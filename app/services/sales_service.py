@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 from typing import Any
 
-from app.core.money import db_text, display, money, qty, qty_text, require_non_negative
+from app.core.currency import sale_currency_snapshot
+from app.core.money import db_text, money, qty, qty_text, require_non_negative
 from app.db.database import Database
 from app.services.settings_service import SettingsService
 
@@ -24,6 +26,9 @@ class SalesService:
         conn.execute("UPDATE invoice_sequences SET last_number = ? WHERE prefix = ?", (next_number, prefix))
         return f"{prefix}-{next_number:06d}"
 
+    def _current_currency_snapshot(self) -> dict[str, str]:
+        return sale_currency_snapshot(self.settings.get_all())
+
     def create_sale(self, items: list[dict[str, Any]], payment_method: str = "cash", paid_amount: object = "0", notes: str = "") -> dict[str, Any]:
         if not items:
             raise ValueError("السلة فارغة")
@@ -32,6 +37,7 @@ class SalesService:
 
         paid = require_non_negative(money(paid_amount), "المبلغ المدفوع")
         allow_negative_stock = self.settings.get("allow_negative_stock", "false") == "true"
+        currency_snapshot = self._current_currency_snapshot()
 
         with self.db.transaction() as conn:
             invoice_number = self._next_invoice_number(conn, "SALE")
@@ -92,10 +98,26 @@ class SalesService:
 
             sale_cur = conn.execute(
                 """
-                INSERT INTO sales(invoice_number, subtotal, discount, total_amount, paid_amount, payment_method, notes)
-                VALUES (?, ?, '0.0000', ?, ?, ?, ?)
+                INSERT INTO sales(
+                  invoice_number, subtotal, discount, total_amount, paid_amount, payment_method,
+                  currency_name, currency_symbol, exchange_currency_name, exchange_currency_symbol, exchange_rate,
+                  notes
+                )
+                VALUES (?, ?, '0.0000', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (invoice_number, db_text(subtotal), db_text(total), db_text(paid), payment_method, notes.strip() or None),
+                (
+                    invoice_number,
+                    db_text(subtotal),
+                    db_text(total),
+                    db_text(paid),
+                    payment_method,
+                    currency_snapshot["currency_name"],
+                    currency_snapshot["currency_symbol"],
+                    currency_snapshot["exchange_currency_name"],
+                    currency_snapshot["exchange_currency_symbol"],
+                    currency_snapshot["exchange_rate"],
+                    notes.strip() or None,
+                ),
             )
             sale_id = int(sale_cur.lastrowid)
 
@@ -146,6 +168,201 @@ class SalesService:
                 "profit_amount": db_text(total_profit),
             }
 
+    def update_sale(
+        self,
+        sale_id: int,
+        items: list[dict[str, Any]],
+        *,
+        payment_method: str = "cash",
+        paid_amount: object = "0",
+        reason: str = "تعديل/مرتجع من شاشة الفاتورة",
+    ) -> dict[str, Any]:
+        if payment_method not in {"cash", "card"}:
+            raise ValueError("طريقة الدفع غير مدعومة في النسخة الخفيفة حالياً")
+        if not items:
+            raise ValueError("لا توجد بنود للتعديل")
+
+        paid = require_non_negative(money(paid_amount), "المبلغ المدفوع")
+        allow_negative_stock = self.settings.get("allow_negative_stock", "false") == "true"
+
+        with self.db.transaction() as conn:
+            sale = conn.execute("SELECT * FROM sales WHERE id = ?", (sale_id,)).fetchone()
+            if not sale:
+                raise ValueError("الفاتورة غير موجودة")
+
+            existing_rows = conn.execute(
+                """
+                SELECT si.*, p.name AS product_name, p.stock_quantity AS current_stock
+                FROM sale_items si
+                JOIN products p ON p.id = si.product_id
+                WHERE si.sale_id = ?
+                ORDER BY si.id ASC
+                """,
+                (sale_id,),
+            ).fetchall()
+            existing = {int(row["id"]): row for row in existing_rows}
+            submitted_ids = {int(raw.get("sale_item_id") or 0) for raw in items}
+
+            existing_ids = set(existing.keys())
+            if submitted_ids != existing_ids:
+                raise ValueError("يجب إرسال كل بنود الفاتورة عند التعديل حفاظاً على دقة الإجمالي والمخزون")
+
+            normalized: list[dict[str, Any]] = []
+            subtotal = Decimal("0.0000")
+            total = Decimal("0.0000")
+            total_profit = Decimal("0.0000")
+            changed = False
+
+            for raw in items:
+                sale_item_id = int(raw["sale_item_id"])
+                old = existing[sale_item_id]
+                product_id = int(old["product_id"])
+                old_qty = qty(old["quantity"])
+                new_qty = require_non_negative(qty(raw.get("quantity", old["quantity"])), "الكمية")
+                unit_price = require_non_negative(money(raw.get("unit_price", old["unit_price"])), "سعر البيع")
+                unit_cost = require_non_negative(money(old["unit_cost"]), "تكلفة المنتج")
+                discount = require_non_negative(money(raw.get("discount", old["discount"])), "خصم السطر")
+
+                line_before_discount = money(unit_price * new_qty)
+                if discount > line_before_discount and new_qty > 0:
+                    raise ValueError(f"خصم السطر أكبر من قيمة المنتج: {old['product_name']}")
+                if new_qty == Decimal("0.0000") and discount > 0:
+                    raise ValueError(f"لا يمكن وضع خصم على بند كميته صفر: {old['product_name']}")
+
+                line_total = money(line_before_discount - discount)
+                line_profit = money(((unit_price - unit_cost) * new_qty) - discount)
+
+                if new_qty > 0:
+                    subtotal = money(subtotal + line_before_discount)
+                    total = money(total + line_total)
+                    total_profit = money(total_profit + line_profit)
+
+                qty_delta = qty(new_qty - old_qty)
+                if qty_delta != Decimal("0.0000"):
+                    product = conn.execute("SELECT stock_quantity FROM products WHERE id = ?", (product_id,)).fetchone()
+                    if not product:
+                        raise ValueError(f"المنتج غير موجود: {old['product_name']}")
+                    stock_before = qty(product["stock_quantity"])
+                    # Increasing invoice quantity means more stock goes out.
+                    stock_after = qty(stock_before - qty_delta)
+                    if not allow_negative_stock and stock_after < 0:
+                        raise ValueError(f"المخزون غير كافٍ لتعديل المنتج: {old['product_name']}")
+                    movement_type = "adjustment_out" if qty_delta > 0 else "sale_return"
+                    note_action = "زيادة كمية ضمن تعديل الفاتورة" if qty_delta > 0 else "مرتجع ضمن تعديل الفاتورة"
+                    conn.execute(
+                        "UPDATE products SET stock_quantity = ?, updated_at = datetime('now','localtime') WHERE id = ?",
+                        (qty_text(stock_after), product_id),
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO stock_movements
+                          (product_id, movement_type, quantity_change, quantity_before, quantity_after, reference_id, reference_type, note)
+                        VALUES (?, ?, ?, ?, ?, ?, 'sale_edit', ?)
+                        """,
+                        (
+                            product_id,
+                            movement_type,
+                            qty_text(-qty_delta),
+                            qty_text(stock_before),
+                            qty_text(stock_after),
+                            sale_id,
+                            f"{note_action} - فاتورة {sale['invoice_number']}",
+                        ),
+                    )
+                    changed = True
+
+                old_unit_price = money(old["unit_price"])
+                old_discount = money(old["discount"])
+                if new_qty != old_qty or unit_price != old_unit_price or discount != old_discount:
+                    changed = True
+
+                normalized.append(
+                    {
+                        "sale_item_id": sale_item_id,
+                        "product_id": product_id,
+                        "quantity": new_qty,
+                        "unit_price": unit_price,
+                        "unit_cost": unit_cost,
+                        "discount": discount,
+                        "line_total": line_total,
+                        "line_profit": line_profit,
+                    }
+                )
+
+            if paid == Decimal("0.0000"):
+                paid = total
+            if paid < total:
+                raise ValueError("المبلغ المدفوع أقل من إجمالي الفاتورة بعد التعديل")
+
+            if money(sale["paid_amount"]) != paid or str(sale["payment_method"]) != payment_method:
+                changed = True
+
+            for item in normalized:
+                if item["quantity"] == Decimal("0.0000"):
+                    conn.execute("DELETE FROM sale_items WHERE id = ? AND sale_id = ?", (item["sale_item_id"], sale_id))
+                else:
+                    conn.execute(
+                        """
+                        UPDATE sale_items
+                        SET quantity = ?, unit_price = ?, unit_cost = ?, discount = ?, total_price = ?, profit_amount = ?
+                        WHERE id = ? AND sale_id = ?
+                        """,
+                        (
+                            qty_text(item["quantity"]),
+                            db_text(item["unit_price"]),
+                            db_text(item["unit_cost"]),
+                            db_text(item["discount"]),
+                            db_text(item["line_total"]),
+                            db_text(item["line_profit"]),
+                            item["sale_item_id"],
+                            sale_id,
+                        ),
+                    )
+
+            conn.execute(
+                """
+                UPDATE sales
+                SET subtotal = ?,
+                    discount = '0.0000',
+                    total_amount = ?,
+                    paid_amount = ?,
+                    payment_method = ?,
+                    edited_at = CASE WHEN ? THEN datetime('now','localtime') ELSE edited_at END,
+                    edit_count = edit_count + CASE WHEN ? THEN 1 ELSE 0 END,
+                    last_edit_reason = CASE WHEN ? THEN ? ELSE last_edit_reason END
+                WHERE id = ?
+                """,
+                (
+                    db_text(subtotal),
+                    db_text(total),
+                    db_text(paid),
+                    payment_method,
+                    1 if changed else 0,
+                    1 if changed else 0,
+                    1 if changed else 0,
+                    reason,
+                    sale_id,
+                ),
+            )
+            if changed:
+                conn.execute(
+                    "INSERT INTO app_logs(level, message, context) VALUES ('info', ?, ?)",
+                    (
+                        f"تم تعديل الفاتورة {sale['invoice_number']}",
+                        json.dumps({"sale_id": sale_id, "reason": reason}, ensure_ascii=False),
+                    ),
+                )
+
+            return {
+                "sale_id": sale_id,
+                "invoice_number": str(sale["invoice_number"]),
+                "subtotal": db_text(subtotal),
+                "total_amount": db_text(total),
+                "paid_amount": db_text(paid),
+                "profit_amount": db_text(total_profit),
+                "changed": changed,
+            }
+
     def today_summary(self) -> dict[str, Any]:
         with self.db.connect() as conn:
             row = conn.execute(
@@ -177,7 +394,10 @@ class SalesService:
         with self.db.connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, invoice_number, total_amount, paid_amount, payment_method, created_at
+                SELECT
+                  id, invoice_number, total_amount, paid_amount, payment_method, created_at,
+                  currency_name, currency_symbol, exchange_currency_name, exchange_currency_symbol, exchange_rate,
+                  edit_count, edited_at, last_edit_reason
                 FROM sales
                 ORDER BY id DESC
                 LIMIT ?
@@ -190,7 +410,11 @@ class SalesService:
         with self.db.connect() as conn:
             sale = conn.execute(
                 """
-                SELECT id, invoice_number, subtotal, discount, total_amount, paid_amount, payment_method, notes, created_at
+                SELECT
+                  id, invoice_number, subtotal, discount, total_amount, paid_amount, payment_method,
+                  currency_name, currency_symbol, exchange_currency_name, exchange_currency_symbol, exchange_rate,
+                  edit_count, edited_at, last_edit_reason,
+                  notes, created_at
                 FROM sales
                 WHERE id = ?
                 """,
