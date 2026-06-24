@@ -1,0 +1,40 @@
+@"
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# Build / package
+build/
+dist/
+*.spec
+
+# Local data - do not upload databases
+data/
+backups/
+*.sqlite
+*.sqlite3
+*.db
+*.db3
+
+# Local backups from patch scripts
+__backup_before_*/
+backup*/
+*.bak
+
+# Secrets
+.env
+*.lic
+tokens/
+secrets/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+"@ | Out-File ".gitignore" -Encoding UTF8
